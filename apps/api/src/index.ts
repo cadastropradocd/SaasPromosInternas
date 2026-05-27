@@ -23,11 +23,11 @@ app.get('/', (c) => {
   return c.json({ message: 'Promos API', version: '2.0.0' })
 })
 
-app.route('/auth', auth)
-app.route('/promotions', promotions)
-app.route('/stores', stores)
-app.route('/dashboard', dashboard)
-app.route('/pdf', pdf)
+app.route('/api/auth', auth)
+app.route('/api/promotions', promotions)
+app.route('/api/stores', stores)
+app.route('/api/dashboard', dashboard)
+app.route('/api/pdf', pdf)
 
 export default app
 export type AppType = typeof app
