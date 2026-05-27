@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { jwt } from 'hono/jwt'
 import { jwt as jwtMiddleware } from 'hono/jwt'
 import * as jose from 'jose'
 import type { D1Database } from '@cloudflare/workers-types'
@@ -23,7 +22,7 @@ const users = [
   { id: '2', email: 'gestor@prado.com', password: 'gestor123', role: 'GESTOR' as const },
 ]
 
-app.post('/api/auth/login', async (c) => {
+app.post('/auth/login', async (c) => {
   const { email, password } = await c.req.json()
   const user = users.find((u) => u.email === email && u.password === password)
   if (!user) return c.json({ error: 'Credenciais inválidas' }, 401)
@@ -33,12 +32,12 @@ app.post('/api/auth/login', async (c) => {
   return c.json({ token, user: { id: user.id, email: user.email, role: user.role } })
 })
 
-app.get('/api/auth/me', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.get('/auth/me', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const payload = c.get('jwtPayload')
   return c.json({ id: payload.sub, email: payload.email, role: payload.role })
 })
 
-app.post('/api/auth/logout', (c) => c.json({ message: 'Logout realizado' }))
+app.post('/auth/logout', (c) => c.json({ message: 'Logout realizado' }))
 
 const expireOldPromotions = async (db: D1Database) => {
   await db.prepare(`UPDATE promotions SET status = 'ENCERRADA' WHERE status = 'ATIVA' AND date(end_date) < date('now')`).run()
@@ -56,7 +55,7 @@ const getAllPromotionsWithStores = async (db: D1Database, query: string, binding
   return Promise.all(result.results.map(async (promo: { id: number }) => getPromotionWithStores(db, promo.id)))
 }
 
-app.get('/api/promotions', async (c) => {
+app.get('/promotions', async (c) => {
   const db = c.env.DB
   await expireOldPromotions(db)
   const { status, search, store_id, period } = c.req.query()
@@ -70,7 +69,7 @@ app.get('/api/promotions', async (c) => {
   return c.json(result)
 })
 
-app.get('/api/promotions/:id', async (c) => {
+app.get('/promotions/:id', async (c) => {
   const db = c.env.DB
   const id = parseInt(c.req.param('id'))
   const promo = await getPromotionWithStores(db, id)
@@ -78,7 +77,7 @@ app.get('/api/promotions/:id', async (c) => {
   return c.json(promo)
 })
 
-app.post('/api/promotions', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.post('/promotions', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const payload = c.get('jwtPayload')
   const { description, retail_price, wholesale_price, start_date, end_date, notes, code, store_ids } = await c.req.json()
@@ -90,7 +89,7 @@ app.post('/api/promotions', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), as
   return c.json(newPromotion, 201)
 })
 
-app.put('/api/promotions/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.put('/promotions/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const payload = c.get('jwtPayload')
   const id = parseInt(c.req.param('id'))
@@ -117,7 +116,7 @@ app.put('/api/promotions/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }),
   return c.json(updated)
 })
 
-app.delete('/api/promotions/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.delete('/promotions/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const payload = c.get('jwtPayload')
   const id = c.req.param('id')
@@ -127,7 +126,7 @@ app.delete('/api/promotions/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET 
   return c.json({ message: 'Promoção excluída' })
 })
 
-app.post('/api/promotions/:id/launch', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.post('/promotions/:id/launch', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const payload = c.get('jwtPayload')
   const id = parseInt(c.req.param('id'))
@@ -139,7 +138,7 @@ app.post('/api/promotions/:id/launch', jwtMiddleware({ secret: c => c.env.JWT_SE
   return c.json(await getPromotionWithStores(db, id))
 })
 
-app.post('/api/promotions/:id/duplicate', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.post('/promotions/:id/duplicate', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const payload = c.get('jwtPayload')
   const id = parseInt(c.req.param('id'))
@@ -154,7 +153,7 @@ app.post('/api/promotions/:id/duplicate', jwtMiddleware({ secret: c => c.env.JWT
   return c.json(await getPromotionWithStores(db, newId), 201)
 })
 
-app.get('/api/stores', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.get('/stores', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const { active } = c.req.query()
   if (active !== undefined) {
@@ -165,14 +164,14 @@ app.get('/api/stores', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (
   return c.json(result.results)
 })
 
-app.get('/api/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.get('/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const result = await db.prepare('SELECT * FROM stores WHERE id = ?').bind(c.req.param('id')).first()
   if (!result) return c.json({ error: 'Loja não encontrada' }, 404)
   return c.json(result)
 })
 
-app.post('/api/stores', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.post('/stores', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const { name, city, active = true } = await c.req.json()
   if (!name) return c.json({ error: 'Nome é obrigatório' }, 400)
@@ -181,7 +180,7 @@ app.post('/api/stores', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async 
   return c.json(newStore, 201)
 })
 
-app.put('/api/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.put('/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const id = c.req.param('id')
   const { name, city, active } = await c.req.json()
@@ -198,7 +197,7 @@ app.put('/api/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), asy
   return c.json(await db.prepare('SELECT * FROM stores WHERE id = ?').bind(id).first())
 })
 
-app.delete('/api/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.delete('/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const payload = c.get('jwtPayload')
   if (payload.role !== 'GESTOR') return c.json({ error: 'Apenas gestores podem excluir' }, 403)
@@ -208,7 +207,7 @@ app.delete('/api/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), 
   return c.json({ message: 'Loja excluída' })
 })
 
-app.get('/api/dashboard', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.get('/dashboard', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   await expireOldPromotions(db)
   const [active, pending, expired] = await Promise.all([
@@ -221,7 +220,7 @@ app.get('/api/dashboard', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), asyn
   return c.json({ active: active?.count || 0, pending: pending?.count || 0, expired: expired?.count || 0, expiring_today: expiringToday?.count || 0, expiring_tomorrow: expiringTomorrow?.count || 0 })
 })
 
-app.post('/api/pdf/generate', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+app.post('/pdf/generate', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const { promotionIds } = await c.req.json()
   if (!promotionIds?.length) return c.json({ error: 'promotionIds é obrigatório' }, 400)
@@ -265,5 +264,4 @@ app.post('/api/pdf/generate', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), 
   return c.json({ url: `data:application/pdf;base64,${Buffer.from(pdfBytes).toString('base64')}`, filename: `promocoes_${Date.now()}.pdf` })
 })
 
-export { app }
-export type AppType = typeof app
+export const onRequest = app.fetch
