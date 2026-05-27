@@ -189,7 +189,7 @@ export function PromotionTable({
       cell: ({ row }) => {
         const status = row.getValue('status') as string
         return (
-          <Badge variant={status.toLowerCase() as 'pendente' | 'ativa' | 'encerrada'}>
+          <Badge variant={status.toLowerCase() as 'pendente' | 'ativa' | 'encerrada' | 'cancelada'}>
             {status}
           </Badge>
         )

@@ -1,11 +1,11 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
-
-const API_URL = import.meta.env.VITE_API_URL || '/api'
+import type { UserRole } from '@prados/shared/types'
 
 interface User {
   id: string
+  name: string
   email: string
-  role: 'COMPRADOR' | 'GESTOR'
+  role: UserRole
 }
 
 interface AuthContextType {
@@ -14,6 +14,10 @@ interface AuthContextType {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => void
+  refreshMe: () => Promise<void>
+  isAdmin: boolean
+  isGestor: boolean
+  isComprador: boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -34,8 +38,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false)
   }, [])
 
+  const refreshMe = async () => {
+    const storedToken = localStorage.getItem('token')
+    if (!storedToken) return
+
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${storedToken}` },
+      })
+      if (res.ok) {
+        const userData = await res.json()
+        setUser(userData)
+        localStorage.setItem('user', JSON.stringify(userData))
+      } else {
+        logout()
+      }
+    } catch {
+      logout()
+    }
+  }
+
   const login = async (email: string, password: string) => {
-    const res = await fetch(`${API_URL}/auth/login`, {
+    const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -61,7 +85,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout }}>
+    <AuthContext.Provider value={{
+      user,
+      token,
+      loading,
+      login,
+      logout,
+      refreshMe,
+      isAdmin: user?.role === 'ADMIN',
+      isGestor: user?.role === 'GESTOR',
+      isComprador: user?.role === 'COMPRADOR',
+    }}>
       {children}
     </AuthContext.Provider>
   )
@@ -70,7 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext)
   if (!context) {
-    throw new Error('useAuth must be used within AuthProvider')
+    throw new Error('useAuth must be used within an AuthProvider')
   }
   return context
 }

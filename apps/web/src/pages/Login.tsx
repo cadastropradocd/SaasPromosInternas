@@ -89,15 +89,18 @@ export function LoginPage() {
           </Button>
         </form>
 
-        <div className="mt-6 border-t pt-4">
-          <p className="text-center text-xs text-gray-500">
-            Credenciais de teste:
-          </p>
-          <div className="mt-2 space-y-1 text-xs text-gray-600">
-            <p>Comprador: comprador@prado.com / comprador123</p>
-            <p>Gestor: gestor@prado.com / gestor123</p>
+        {import.meta.env.DEV && (
+          <div className="mt-6 border-t pt-4">
+            <p className="text-center text-xs text-gray-500">
+              Credenciais de teste:
+            </p>
+            <div className="mt-2 space-y-1 text-xs text-gray-600">
+              <p>Admin: admin@prado.com / admin123</p>
+              <p>Gestor: gestor@prado.com / gestor123</p>
+              <p>Comprador: comprador@prado.com / comprador123</p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   )
