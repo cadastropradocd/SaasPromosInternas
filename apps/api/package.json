@@ -1,0 +1,21 @@
+{
+  "name": "@promos/api",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:generate": "wrangler d1 migrations generate",
+    "db:apply": "wrangler d1 migrations apply"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.7.4",
+    "jose": "^5.9.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250327.0",
+    "wrangler": "^4.9.0",
+    "typescript": "^5.7.3"
+  }
+}
