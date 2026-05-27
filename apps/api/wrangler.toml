@@ -1,3 +1,4 @@
+# Cloudflare Workers + Pages configuration
 name = "promos-api"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
@@ -5,10 +6,14 @@ compatibility_date = "2024-01-01"
 [site]
 bucket = "../web/dist"
 
+# D1 Database - replace CHANGE_TO_YOUR_D1_ID with your actual D1 database ID
+# Run: wrangler d1 list  to get your database ID
+# Run: wrangler d1 migrations apply promos-db --remote  to apply migrations
 [[d1_databases]]
 binding = "DB"
 database_name = "promos-db"
-database_id = "local-dev-db"
+database_id = "CHANGE_TO_YOUR_D1_ID"
 
 [vars]
-JWT_SECRET = "dev-secret-change-in-production"
+JWT_SECRET = "CHANGE_IN_PRODUCTION"
+API_URL = "https://api.yourdomain.workers.dev"

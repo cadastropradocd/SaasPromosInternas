@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { handle } from 'hono/cloudflare-workers'
 import { auth } from './routes/auth'
 import { promotions } from './routes/promotions'
 import { stores } from './routes/stores'
@@ -14,7 +13,11 @@ type Env = {
 
 const app = new Hono<{ Bindings: Env }>()
 
-app.use('/*', cors())
+app.use('/*', cors({
+  origin: '*',
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+}))
 
 app.get('/', (c) => {
   return c.json({ message: 'Promos API', version: '2.0.0' })
