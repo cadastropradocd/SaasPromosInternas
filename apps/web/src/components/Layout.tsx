@@ -8,6 +8,8 @@ import {
   History,
   LogOut,
   Menu,
+  Building2,
+  FileText,
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -16,6 +18,8 @@ const navItems = [
   { href: '/pendentes', label: 'Pendentes', icon: Clock },
   { href: '/ativas', label: 'Ativas', icon: CheckCircle },
   { href: '/historico', label: 'Histórico', icon: History },
+  { href: '/lojas', label: 'Lojas', icon: Building2 },
+  { href: '/pdfs', label: 'PDFs', icon: FileText },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {

@@ -1,5 +1,13 @@
 export type PromotionStatus = 'PENDENTE' | 'ATIVA' | 'ENCERRADA'
 
+export interface Store {
+  id: number
+  name: string
+  city: string | null
+  active: number
+  created_at: string
+}
+
 export interface Promotion {
   id: number
   code: string | null
@@ -10,7 +18,9 @@ export interface Promotion {
   end_date: string
   notes: string | null
   status: PromotionStatus
+  created_by: string | null
   created_at: string
+  stores?: Store[]
 }
 
 export interface CreatePromotionInput {
@@ -21,6 +31,7 @@ export interface CreatePromotionInput {
   start_date: string
   end_date: string
   notes?: string
+  store_ids?: number[]
 }
 
 export interface UpdatePromotionInput extends Partial<CreatePromotionInput> {}
@@ -37,3 +48,19 @@ export interface AuthPayload {
   role: 'COMPRADOR' | 'GESTOR'
   exp: number
 }
+
+export interface DashboardStats {
+  active: number
+  pending: number
+  expired: number
+  expiring_today: number
+  expiring_tomorrow: number
+}
+
+export interface CreateStoreInput {
+  name: string
+  city?: string
+  active?: boolean
+}
+
+export interface UpdateStoreInput extends Partial<CreateStoreInput> {}

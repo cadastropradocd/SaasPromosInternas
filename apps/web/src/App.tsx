@@ -6,6 +6,8 @@ import { DashboardPage } from './pages/Dashboard'
 import { PendentesPage } from './pages/Pendentes'
 import { AtivasPage } from './pages/Ativas'
 import { HistoricoPage } from './pages/Historico'
+import { StoresPage } from './pages/Stores'
+import { PDFsPage } from './pages/PDFs'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -39,6 +41,8 @@ function AppRoutes() {
                 <Route path="/pendentes" element={<PendentesPage />} />
                 <Route path="/ativas" element={<AtivasPage />} />
                 <Route path="/historico" element={<HistoricoPage />} />
+                <Route path="/lojas" element={<StoresPage />} />
+                <Route path="/pdfs" element={<PDFsPage />} />
               </Routes>
             </Layout>
           </ProtectedRoute>

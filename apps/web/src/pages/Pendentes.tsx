@@ -1,19 +1,20 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import type { Promotion } from '@promos/types'
-import { useNavigate } from 'react-router-dom'
-import { Plus, Edit, Trash2, Rocket } from 'lucide-react'
+import { Plus, Rocket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PromotionTable } from '@/components/PromotionTable'
 import { PromotionModal } from '@/components/PromotionModal'
+import { DuplicateModal } from '@/components/DuplicateModal'
 
 export function PendentesPage() {
   const { token, user } = useAuth()
-  const navigate = useNavigate()
   const [promotions, setPromotions] = useState<Promotion[]>([])
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false)
   const [editingPromo, setEditingPromo] = useState<Promotion | null>(null)
+  const [duplicatingPromo, setDuplicatingPromo] = useState<Promotion | null>(null)
 
   const fetchPromotions = useCallback(async () => {
     setLoading(true)
@@ -44,6 +45,11 @@ export function PendentesPage() {
     fetchPromotions()
   }
 
+  const handleDuplicate = (promo: Promotion) => {
+    setDuplicatingPromo(promo)
+    setDuplicateModalOpen(true)
+  }
+
   const handleLaunch = async (id: number) => {
     if (!confirm('Deseja lançar esta promoção?')) return
 
@@ -59,8 +65,18 @@ export function PendentesPage() {
     setEditingPromo(null)
   }
 
+  const handleDuplicateModalClose = () => {
+    setDuplicateModalOpen(false)
+    setDuplicatingPromo(null)
+  }
+
   const handleSaved = () => {
     handleModalClose()
+    fetchPromotions()
+  }
+
+  const handleDuplicated = () => {
+    handleDuplicateModalClose()
     fetchPromotions()
   }
 
@@ -83,6 +99,7 @@ export function PendentesPage() {
           loading={loading}
           onEdit={handleEdit}
           onDelete={handleDelete}
+          onDuplicate={handleDuplicate}
           extraActions={
             user?.role === 'GESTOR'
               ? [
@@ -103,6 +120,13 @@ export function PendentesPage() {
         onClose={handleModalClose}
         onSaved={handleSaved}
         editing={editingPromo}
+      />
+
+      <DuplicateModal
+        open={duplicateModalOpen}
+        onClose={handleDuplicateModalClose}
+        onDuplicated={handleDuplicated}
+        promotion={duplicatingPromo}
       />
     </div>
   )

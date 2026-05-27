@@ -2,13 +2,14 @@ import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import type { Promotion } from '@promos/types'
 import { PromotionTable } from '@/components/PromotionTable'
-import { useNavigate } from 'react-router-dom'
+import { DuplicateModal } from '@/components/DuplicateModal'
 
 export function AtivasPage() {
   const { token } = useAuth()
-  const navigate = useNavigate()
   const [promotions, setPromotions] = useState<Promotion[]>([])
   const [loading, setLoading] = useState(true)
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false)
+  const [duplicatingPromo, setDuplicatingPromo] = useState<Promotion | null>(null)
 
   const fetchPromotions = useCallback(async () => {
     setLoading(true)
@@ -24,6 +25,21 @@ export function AtivasPage() {
     fetchPromotions()
   }, [fetchPromotions])
 
+  const handleDuplicate = (promo: Promotion) => {
+    setDuplicatingPromo(promo)
+    setDuplicateModalOpen(true)
+  }
+
+  const handleDuplicateModalClose = () => {
+    setDuplicateModalOpen(false)
+    setDuplicatingPromo(null)
+  }
+
+  const handleDuplicated = () => {
+    handleDuplicateModalClose()
+    fetchPromotions()
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -32,8 +48,19 @@ export function AtivasPage() {
       </div>
 
       <div className="rounded-lg bg-white shadow">
-        <PromotionTable data={promotions} loading={loading} />
+        <PromotionTable
+          data={promotions}
+          loading={loading}
+          onDuplicate={handleDuplicate}
+        />
       </div>
+
+      <DuplicateModal
+        open={duplicateModalOpen}
+        onClose={handleDuplicateModalClose}
+        onDuplicated={handleDuplicated}
+        promotion={duplicatingPromo}
+      />
     </div>
   )
 }
