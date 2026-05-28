@@ -76,7 +76,7 @@ export interface DashboardStats {
   active: number
   pending: number
   expired: number
-  cancelling?: number
+  cancelled: number
   expiring_today: number
   expiring_tomorrow: number
 }

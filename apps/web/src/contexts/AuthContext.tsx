@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import type { UserRole } from '@prados/shared/types'
+import { ApiError } from '@/lib/api'
 
 interface User {
   id: string
@@ -107,4 +108,12 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider')
   }
   return context
+}
+
+export function handleApiError(error: unknown, logout: () => void) {
+  if (error instanceof ApiError && error.status === 401) {
+    logout()
+    return true
+  }
+  return false
 }

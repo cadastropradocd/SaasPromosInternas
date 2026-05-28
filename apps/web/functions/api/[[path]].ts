@@ -7,6 +7,8 @@ import type { D1Database } from '@cloudflare/workers-types'
 type Env = {
   JWT_SECRET: string
   DB: D1Database
+  ALLOW_SEED?: string
+  SEED_TOKEN?: string
 }
 
 const app = new Hono<{ Bindings: Env }>()
@@ -18,6 +20,10 @@ app.use('/*', cors({
 }))
 
 app.get('/health', (c) => c.json({ ok: true, service: 'promos-prado-api', version: '3.0.0' }))
+
+function hasRole(payload: { role: string }, roles: string[]): boolean {
+  return roles.includes(payload.role)
+}
 
 async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder()
@@ -34,6 +40,7 @@ async function verifyPassword(password: string, storedHash: string): Promise<boo
   try {
     const encoder = new TextEncoder()
     const [saltHex, hashHex] = storedHash.split(':')
+    if (!saltHex || !hashHex) return false
     const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map(b => parseInt(b, 16)))
     const storedHashBytes = new Uint8Array(hashHex.match(/.{2}/g)!.map(b => parseInt(b, 16)))
     const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'])
@@ -59,6 +66,13 @@ app.post('/auth/login', async (c) => {
 })
 
 app.post('/auth/seed', async (c) => {
+  if (c.env.ALLOW_SEED !== 'true') {
+    return c.json({ error: 'Seed disabled' }, 403)
+  }
+  const seedToken = c.req.header('X-Seed-Token')
+  if (c.env.SEED_TOKEN && seedToken !== c.env.SEED_TOKEN) {
+    return c.json({ error: 'Invalid seed token' }, 403)
+  }
   const db = c.env.DB
   const existing = await db.prepare('SELECT id FROM users WHERE email = ?').bind('admin@prado.com').first()
   if (existing) return c.json({ message: 'Seed already exists' })
@@ -81,17 +95,25 @@ app.get('/auth/me', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) 
 app.post('/auth/logout', (c) => c.json({ message: 'Logout realizado' }))
 
 const expireOldPromotions = async (db: D1Database) => {
-  await db.prepare(`UPDATE promotions SET status = 'ENCERRADA', closed_at = CURRENT_TIMESTAMP WHERE status = 'ATIVA' AND date(end_date) < date('now') AND closed_at IS NULL`).run()
+  const toExpire = await db.prepare(`SELECT id, status FROM promotions WHERE status = 'ATIVA' AND date(end_date) < date('now') AND closed_at IS NULL AND deleted_at IS NULL`).all()
+  for (const promo of toExpire.results as { id: number }[]) {
+    await db.prepare(`UPDATE promotions SET status = 'ENCERRADA', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(promo.id).run()
+    await createPromotionHistory(db, promo.id, null, 'CLOSE', 'ATIVA', 'ENCERRADA')
+  }
 }
 
 const createPromotionHistory = async (db: D1Database, promotionId: number, userId: string | null, action: string, oldStatus?: string, newStatus?: string, payload?: object) => {
   await db.prepare('INSERT INTO promotion_history (promotion_id, user_id, action, old_status, new_status, payload) VALUES (?, ?, ?, ?, ?, ?)').bind(promotionId, userId, action, oldStatus || null, newStatus || null, payload ? JSON.stringify(payload) : null).run()
 }
 
-const getPromotionWithStores = async (db: D1Database, id: number) => {
-  const promo = await db.prepare('SELECT * FROM promotions WHERE id = ?').bind(id).first()
+const getPromotionWithStores = async (db: D1Database, id: number, options?: { includeDeleted?: boolean }) => {
+  let query = 'SELECT * FROM promotions WHERE id = ?'
+  if (!options?.includeDeleted) {
+    query += ' AND deleted_at IS NULL'
+  }
+  const promo = await db.prepare(query).bind(id).first()
   if (!promo) return null
-  const stores = await db.prepare(`SELECT s.* FROM stores s INNER JOIN promotion_stores ps ON s.id = ps.store_id WHERE ps.promotion_id = ?`).bind(id).all()
+  const stores = await db.prepare(`SELECT s.* FROM stores s INNER JOIN promotion_stores ps ON s.id = ps.store_id WHERE ps.promotion_id = ? AND s.deleted_at IS NULL`).bind(id).all()
   return { ...promo, stores: stores.results }
 }
 
@@ -100,7 +122,7 @@ const getAllPromotionsWithStores = async (db: D1Database, query: string, binding
   return Promise.all(result.results.map(async (promo: { id: number }) => getPromotionWithStores(db, promo.id)))
 }
 
-app.get('/promotions', async (c) => {
+app.get('/promotions', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   await expireOldPromotions(db)
   const { status, search, store_id, period } = c.req.query()
@@ -109,16 +131,38 @@ app.get('/promotions', async (c) => {
   if (status) { query += ' AND status = ?'; bindings.push(status) }
   if (search) { query += ' AND (description LIKE ? OR code LIKE ?)'; bindings.push(`%${search}%`, `%${search}%`) }
   if (store_id) { query += ` AND id IN (SELECT promotion_id FROM promotion_stores WHERE store_id = ?)`; bindings.push(parseInt(store_id)) }
-  query += ' ORDER BY created_at DESC'
+  if (period) {
+    switch (period) {
+      case 'today':
+        query += ` AND date(end_date) = date('now')`
+        break
+      case 'tomorrow':
+        query += ` AND date(end_date) = date('now', '+1 day')`
+        break
+      case 'week':
+        query += ` AND date(end_date) <= date('now', '+7 days')`
+        break
+      case 'month':
+        query += ` AND date(end_date) <= date('now', '+30 days')`
+        break
+      case 'expired':
+        query += ` AND date(end_date) < date('now')`
+        break
+    }
+  }
+  const limit = Math.min(parseInt(c.req.query('limit') || '50'), 100)
+  const offset = parseInt(c.req.query('offset') || '0')
+  query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
+  bindings.push(limit, offset)
   const result = await getAllPromotionsWithStores(db, query, bindings)
   return c.json(result)
 })
 
-app.get('/promotions/:id', async (c) => {
+app.get('/promotions/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const id = parseInt(c.req.param('id'))
   const promo = await getPromotionWithStores(db, id)
-  if (!promo) return c.json({ error: 'Promoção não encontrada' }, 404)
+  if (!promo) return c.json({ error: 'Promo\\u00e7\\u00e3o não encontrada' }, 404)
   return c.json(promo)
 })
 
@@ -129,7 +173,7 @@ app.post('/promotions', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async 
   if (!description || !retail_price || !start_date || !end_date) return c.json({ error: 'Campos obrigatórios' }, 400)
   const result = await db.prepare(`INSERT INTO promotions (code, description, retail_price, wholesale_price, start_date, end_date, notes, status, created_by, category_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDENTE', ?, ?)`).bind(code || null, description, retail_price, wholesale_price || null, start_date, end_date, notes || null, payload.sub, category_id || null).run()
   const promotionId = result.meta.last_row_id as number
-  if (store_ids?.length) for (const storeId of store_ids) await db.prepare('INSERT INTO promotion_stores (promotion_id, store_id) VALUES (?, ?)').bind(promotionId, storeId).run()
+  if (store_ids?.length) for (const storeId of store_ids) await db.prepare('INSERT INTO promotion_stores (promotion_id, store_id) VALUES (?, ?)').bind(+promotionId, storeId).run()
   await createPromotionHistory(db, promotionId, payload.sub, 'CREATE', undefined, 'PENDENTE', { description, retail_price })
   const newPromotion = await getPromotionWithStores(db, promotionId)
   return c.json(newPromotion, 201)
@@ -140,10 +184,10 @@ app.put('/promotions/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), asy
   const payload = c.get('jwtPayload')
   const id = parseInt(c.req.param('id'))
   const body = await c.req.json()
-  const existing = await db.prepare('SELECT * FROM promotions WHERE id = ? AND deleted_at IS NULL').bind(id).first()
-  if (!existing) return c.json({ error: 'Promoção não encontrada' }, 404)
-  const canEdit = payload.role === 'GESTOR' || payload.role === 'ADMIN' || (payload.role === 'COMPRADOR' && (existing as { status: string }).status === 'PENDENTE' && (existing as { created_by: string }).created_by === payload.sub)
-  if (!canEdit) return c.json({ error: 'Sem permissão' }, 403)
+  const existing = await db.prepare('SELECT * FROM promotions WHERE id = ? AND deleted_at IS NULL').bind(id).first() as { status: string; created_by: string } | null
+  if (!existing) return c.json({ error: 'Promo\\u00e7\\u00e3o não encontrada' }, 404)
+  const canEdit = hasRole(payload, ['ADMIN', 'GESTOR']) || (payload.role === 'COMPRADOR' && existing.status === 'PENDENTE' && existing.created_by === payload.sub)
+  if (!canEdit) return c.json({ error: 'Sem permiss\\u00e3o' }, 403)
   const updates: string[] = ['updated_at = CURRENT_TIMESTAMP']
   const bindings: (string | number | null)[] = []
   if (body.code !== undefined) { updates.push('code = ?'); bindings.push(body.code) }
@@ -155,11 +199,11 @@ app.put('/promotions/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), asy
   if (body.notes !== undefined) { updates.push('notes = ?'); bindings.push(body.notes) }
   if (body.category_id !== undefined) { updates.push('category_id = ?'); bindings.push(body.category_id) }
   if (updates.length > 1) { bindings.push(id); await db.prepare(`UPDATE promotions SET ${updates.join(', ')} WHERE id = ?`).bind(...bindings).run() }
-  if (body.store_ids !== undefined && (payload.role === 'GESTOR' || payload.role === 'ADMIN')) {
+  if (body.store_ids !== undefined && hasRole(payload, ['ADMIN', 'GESTOR'])) {
     await db.prepare('DELETE FROM promotion_stores WHERE promotion_id = ?').bind(id).run()
     if (body.store_ids.length > 0) for (const storeId of body.store_ids) await db.prepare('INSERT INTO promotion_stores (promotion_id, store_id) VALUES (?, ?)').bind(id, storeId).run()
   }
-  await createPromotionHistory(db, id, payload.sub, 'UPDATE', (existing as { status: string }).status, (existing as { status: string }).status, body)
+  await createPromotionHistory(db, id, payload.sub, 'UPDATE', existing.status, existing.status, body)
   const updated = await getPromotionWithStores(db, id)
   return c.json(updated)
 })
@@ -168,23 +212,24 @@ app.delete('/promotions/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), 
   const db = c.env.DB
   const payload = c.get('jwtPayload')
   const id = c.req.param('id')
-  if (payload.role !== 'GESTOR' && payload.role !== 'ADMIN') return c.json({ error: 'Apenas gestores podem excluir' }, 403)
-  const existing = await db.prepare('SELECT * FROM promotions WHERE id = ? AND deleted_at IS NULL').bind(id).first()
-  if (!existing) return c.json({ error: 'Promoção não encontrada' }, 404)
-  await db.prepare('UPDATE promotions SET deleted_at = CURRENT_TIMESTAMP, status = ? WHERE id = ?').bind('CANCELADA', id).run()
-  await createPromotionHistory(db, parseInt(id), payload.sub, 'SOFT_DELETE', (existing as { status: string }).status, 'CANCELADA')
-  return c.json({ message: 'Promoção removida' })
+  if (!hasRole(payload, ['ADMIN', 'GESTOR'])) return c.json({ error: 'Apenas administradores ou gestores podem excluir' }, 403)
+  const existing = await db.prepare('SELECT * FROM promotions WHERE id = ? AND deleted_at IS NULL').bind(id).first() as { status: string } | null
+  if (!existing) return c.json({ error: 'Promo\\u00e7\\u00e3o não encontrada' }, 404)
+  await db.prepare('UPDATE promotions SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, status = ? WHERE id = ?').bind('CANCELADA', id).run()
+  await db.prepare('UPDATE stores SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, active = 0 WHERE id IN (SELECT store_id FROM promotion_stores WHERE promotion_id = ?) AND deleted_at IS NULL').bind(id).run()
+  await createPromotionHistory(db, parseInt(id), payload.sub, 'SOFT_DELETE', existing.status, 'CANCELADA')
+  return c.json({ message: 'Promo\\u00e7\\u00e3o removida' })
 })
 
 app.post('/promotions/:id/launch', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const payload = c.get('jwtPayload')
   const id = parseInt(c.req.param('id'))
-  if (payload.role !== 'GESTOR' && payload.role !== 'ADMIN') return c.json({ error: 'Apenas gestores podem lançar' }, 403)
-  const existing = await db.prepare('SELECT * FROM promotions WHERE id = ? AND deleted_at IS NULL').bind(id).first()
-  if (!existing) return c.json({ error: 'Promoção não encontrada' }, 404)
-  if ((existing as { status: string }).status !== 'PENDENTE') return c.json({ error: 'Apenas PENDENTE podem ser lançadas' }, 400)
-  await db.prepare("UPDATE promotions SET status = 'ATIVA', launched_by = ?, launched_at = CURRENT_TIMESTAMP WHERE id = ?").bind(payload.sub, id).run()
+  if (!hasRole(payload, ['ADMIN', 'GESTOR'])) return c.json({ error: 'Apenas administradores ou gestores podem lançar' }, 403)
+  const existing = await db.prepare('SELECT * FROM promotions WHERE id = ? AND deleted_at IS NULL').bind(id).first() as { status: string } | null
+  if (!existing) return c.json({ error: 'Promo\\u00e7\\u00e3o não encontrada' }, 404)
+  if (existing.status !== 'PENDENTE') return c.json({ error: 'Apenas PENDENTE podem ser lançadas' }, 400)
+  await db.prepare("UPDATE promotions SET status = 'ATIVA', launched_by = ?, launched_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL").bind(payload.sub, id).run()
   await createPromotionHistory(db, id, payload.sub, 'LAUNCH', 'PENDENTE', 'ATIVA')
   return c.json(await getPromotionWithStores(db, id))
 })
@@ -193,12 +238,12 @@ app.post('/promotions/:id/cancel', jwtMiddleware({ secret: c => c.env.JWT_SECRET
   const db = c.env.DB
   const payload = c.get('jwtPayload')
   const id = parseInt(c.req.param('id'))
-  if (payload.role !== 'GESTOR' && payload.role !== 'ADMIN') return c.json({ error: 'Apenas gestores podem cancelar' }, 403)
-  const existing = await db.prepare('SELECT * FROM promotions WHERE id = ? AND deleted_at IS NULL').bind(id).first()
-  if (!existing) return c.json({ error: 'Promoção não encontrada' }, 404)
-  if ((existing as { status: string }).status === 'CANCELADA' || (existing as { status: string }).status === 'ENCERRADA') return c.json({ error: 'Não é possível cancelar' }, 400)
-  await db.prepare("UPDATE promotions SET status = 'CANCELADA', cancelled_by = ?, cancelled_at = CURRENT_TIMESTAMP WHERE id = ?").bind(payload.sub, id).run()
-  await createPromotionHistory(db, id, payload.sub, 'CANCEL', (existing as { status: string }).status, 'CANCELADA')
+  if (!hasRole(payload, ['ADMIN', 'GESTOR'])) return c.json({ error: 'Apenas administradores ou gestores podem cancelar' }, 403)
+  const existing = await db.prepare('SELECT * FROM promotions WHERE id = ? AND deleted_at IS NULL').bind(id).first() as { status: string } | null
+  if (!existing) return c.json({ error: 'Promo\\u00e7\\u00e3o não encontrada' }, 404)
+  if (existing.status === 'CANCELADA' || existing.status === 'ENCERRADA') return c.json({ error: 'Não é possível cancelar' }, 400)
+  await db.prepare("UPDATE promotions SET status = 'CANCELADA', cancelled_by = ?, cancelled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL").bind(payload.sub, id).run()
+  await createPromotionHistory(db, id, payload.sub, 'CANCEL', existing.status, 'CANCELADA')
   return c.json(await getPromotionWithStores(db, id))
 })
 
@@ -208,7 +253,7 @@ app.post('/promotions/:id/duplicate', jwtMiddleware({ secret: c => c.env.JWT_SEC
   const id = parseInt(c.req.param('id'))
   const { start_date, end_date, store_ids } = await c.req.json()
   const existing = await getPromotionWithStores(db, id)
-  if (!existing) return c.json({ error: 'Promoção não encontrada' }, 404)
+  if (!existing) return c.json({ error: 'Promo\\u00e7\\u00e3o não encontrada' }, 404)
   if (!start_date || !end_date) return c.json({ error: 'Datas obrigatórias' }, 400)
   const result = await db.prepare(`INSERT INTO promotions (code, description, retail_price, wholesale_price, start_date, end_date, notes, status, created_by, category_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDENTE', ?, ?)`).bind(existing.code, existing.description, existing.retail_price, existing.wholesale_price, start_date, end_date, existing.notes, payload.sub, (existing as { category_id?: number }).category_id || null).run()
   const newId = result.meta.last_row_id as number
@@ -238,6 +283,8 @@ app.get('/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (
 
 app.post('/stores', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
+  const payload = c.get('jwtPayload')
+  if (!hasRole(payload, ['ADMIN', 'GESTOR'])) return c.json({ error: 'Apenas administradores ou gestores podem criar lojas' }, 403)
   const { name, city, active = true } = await c.req.json()
   if (!name) return c.json({ error: 'Nome é obrigatório' }, 400)
   const result = await db.prepare('INSERT INTO stores (name, city, active) VALUES (?, ?, ?)').bind(name, city || null, active ? 1 : 0).run()
@@ -247,6 +294,8 @@ app.post('/stores', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) 
 
 app.put('/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
+  const payload = c.get('jwtPayload')
+  if (!hasRole(payload, ['ADMIN', 'GESTOR'])) return c.json({ error: 'Apenas administradores ou gestores podem editar lojas' }, 403)
   const id = c.req.param('id')
   const { name, city, active } = await c.req.json()
   const existing = await db.prepare('SELECT * FROM stores WHERE id = ? AND deleted_at IS NULL').bind(id).first()
@@ -265,10 +314,10 @@ app.put('/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (
 app.delete('/stores/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
   const payload = c.get('jwtPayload')
-  if (payload.role !== 'GESTOR' && payload.role !== 'ADMIN') return c.json({ error: 'Apenas gestores podem excluir' }, 403)
+  if (!hasRole(payload, ['ADMIN', 'GESTOR'])) return c.json({ error: 'Apenas administradores ou gestores podem excluir' }, 403)
   const existing = await db.prepare('SELECT * FROM stores WHERE id = ? AND deleted_at IS NULL').bind(c.req.param('id')).first()
   if (!existing) return c.json({ error: 'Loja não encontrada' }, 404)
-  await db.prepare('UPDATE stores SET deleted_at = CURRENT_TIMESTAMP, active = 0 WHERE id = ?').bind(c.req.param('id')).run()
+  await db.prepare('UPDATE stores SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, active = 0 WHERE id = ?').bind(c.req.param('id')).run()
   return c.json({ message: 'Loja removida' })
 })
 
@@ -278,13 +327,51 @@ app.get('/categories', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (
   return c.json(result.results)
 })
 
+app.get('/categories/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+  const db = c.env.DB
+  const id = c.req.param('id')
+  const result = await db.prepare('SELECT * FROM categories WHERE id = ? AND deleted_at IS NULL').bind(id).first()
+  if (!result) return c.json({ error: 'Categoria não encontrada' }, 404)
+  return c.json(result)
+})
+
 app.post('/categories', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
+  const payload = c.get('jwtPayload')
+  if (!hasRole(payload, ['ADMIN', 'GESTOR'])) return c.json({ error: 'Apenas administradores ou gestores podem criar categorias' }, 403)
   const { name, active = true } = await c.req.json()
   if (!name) return c.json({ error: 'Nome é obrigatório' }, 400)
   const result = await db.prepare('INSERT INTO categories (name, active) VALUES (?, ?)').bind(name, active ? 1 : 0).run()
   const newCategory = await db.prepare('SELECT * FROM categories WHERE id = ?').bind(result.meta.last_row_id).first()
   return c.json(newCategory, 201)
+})
+
+app.put('/categories/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+  const db = c.env.DB
+  const payload = c.get('jwtPayload')
+  if (!hasRole(payload, ['ADMIN', 'GESTOR'])) return c.json({ error: 'Apenas administradores ou gestores podem editar categorias' }, 403)
+  const id = c.req.param('id')
+  const { name, active } = await c.req.json()
+  const existing = await db.prepare('SELECT * FROM categories WHERE id = ? AND deleted_at IS NULL').bind(id).first()
+  if (!existing) return c.json({ error: 'Categoria não encontrada' }, 404)
+  const updates: string[] = ['updated_at = CURRENT_TIMESTAMP']
+  const bindings: (string | number | null)[] = []
+  if (name !== undefined) { updates.push('name = ?'); bindings.push(name) }
+  if (active !== undefined) { updates.push('active = ?'); bindings.push(active ? 1 : 0) }
+  if (updates.length === 1) return c.json({ error: 'Nenhum campo para atualizar' }, 400)
+  bindings.push(parseInt(id))
+  await db.prepare(`UPDATE categories SET ${updates.join(', ')} WHERE id = ?`).bind(...bindings).run()
+  return c.json(await db.prepare('SELECT * FROM categories WHERE id = ?').bind(id).first())
+})
+
+app.delete('/categories/:id', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
+  const db = c.env.DB
+  const payload = c.get('jwtPayload')
+  if (!hasRole(payload, ['ADMIN', 'GESTOR'])) return c.json({ error: 'Apenas administradores ou gestores podem excluir categorias' }, 403)
+  const existing = await db.prepare('SELECT * FROM categories WHERE id = ? AND deleted_at IS NULL').bind(c.req.param('id')).first()
+  if (!existing) return c.json({ error: 'Categoria não encontrada' }, 404)
+  await db.prepare('UPDATE categories SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, active = 0 WHERE id = ?').bind(c.req.param('id')).run()
+  return c.json({ message: 'Categoria removida' })
 })
 
 app.get('/dashboard', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
@@ -298,11 +385,12 @@ app.get('/dashboard', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c
   ])
   const expiringToday = await db.prepare(`SELECT COUNT(*) as count FROM promotions WHERE status = 'ATIVA' AND date(end_date) = date('now') AND deleted_at IS NULL`).first()
   const expiringTomorrow = await db.prepare(`SELECT COUNT(*) as count FROM promotions WHERE status = 'ATIVA' AND date(end_date) = date('now', '+1 day') AND deleted_at IS NULL`).first()
-  return c.json({ active: active?.count || 0, pending: pending?.count || 0, expired: expired?.count || 0, cancelling: cancelled?.count || 0, expiring_today: expiringToday?.count || 0, expiring_tomorrow: expiringTomorrow?.count || 0 })
+  return c.json({ active: active?.count || 0, pending: pending?.count || 0, expired: expired?.count || 0, cancelled: cancelled?.count || 0, expiring_today: expiringToday?.count || 0, expiring_tomorrow: expiringTomorrow?.count || 0 })
 })
 
 app.post('/pdf/generate', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), async (c) => {
   const db = c.env.DB
+  const payload = c.get('jwtPayload')
   const { promotionIds } = await c.req.json()
   if (!promotionIds?.length) return c.json({ error: 'promotionIds é obrigatório' }, 400)
   const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib')
@@ -310,7 +398,7 @@ app.post('/pdf/generate', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), asyn
   for (const id of promotionIds) {
     const promo = await db.prepare('SELECT * FROM promotions WHERE id = ? AND deleted_at IS NULL').bind(id).first()
     if (promo) {
-      const stores = await db.prepare(`SELECT s.name, s.city FROM stores s INNER JOIN promotion_stores ps ON s.id = ps.store_id WHERE ps.promotion_id = ?`).bind(id).all()
+      const stores = await db.prepare(`SELECT s.name, s.city FROM stores s INNER JOIN promotion_stores ps ON s.id = ps.store_id WHERE ps.promotion_id = ? AND s.deleted_at IS NULL`).bind(id).all()
       promotions.push({ ...promo, stores: stores.results })
     }
   }
@@ -342,7 +430,9 @@ app.post('/pdf/generate', jwtMiddleware({ secret: c => c.env.JWT_SECRET }), asyn
     y -= 15
   }
   const pdfBytes = await pdfDoc.save()
-  return c.json({ url: `data:application/pdf;base64,${Buffer.from(pdfBytes).toString('base64')}`, filename: `promocoes_${Date.now()}.pdf` })
+  const filename = `promocoes_${Date.now()}.pdf`
+  await db.prepare('INSERT INTO generated_files (promotion_id, file_type, file_name, file_url, created_by) VALUES (?, ?, ?, ?, ?)').bind(null, 'PDF', filename, `data:application/pdf;base64,${Buffer.from(pdfBytes).toString('base64')}`, payload.sub).run()
+  return c.json({ url: `data:application/pdf;base64,${Buffer.from(pdfBytes).toString('base64')}`, filename })
 })
 
 export const onRequest = app.fetch
