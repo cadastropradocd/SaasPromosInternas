@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
-import type { UserRole } from '@prados/shared/types'
+import type { UserRole } from '@promos/types'
 import { ApiError } from '@/lib/api'
 
 interface User {

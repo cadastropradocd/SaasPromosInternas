@@ -15,7 +15,6 @@ import type { Promotion } from '@promos/types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { cn } from '@/lib/utils'
 
 interface ExtraAction {
   label: string
@@ -127,21 +126,31 @@ export function PromotionTable({
           <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
       ),
-      cell: ({ row }) =>
-        row.getValue('retail_price')?.toLocaleString('pt-BR', {
-          style: 'currency',
-          currency: 'BRL',
-        }) || '-',
+      cell: ({ row }) => {
+        const value = row.getValue('retail_price');
+        if (typeof value === 'number') {
+          return new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL',
+          }).format(value);
+        }
+        return '-';
+      },
       size: 100,
     },
     {
       accessorKey: 'wholesale_price',
       header: 'Atacado',
-      cell: ({ row }) =>
-        row.getValue('wholesale_price')?.toLocaleString('pt-BR', {
-          style: 'currency',
-          currency: 'BRL',
-        }) || '-',
+      cell: ({ row }) => {
+        const value = row.getValue('wholesale_price');
+        if (typeof value === 'number') {
+          return new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL',
+          }).format(value);
+        }
+        return '-';
+      },
       size: 100,
     },
     {

@@ -32,7 +32,7 @@ auth.post('/login', async (c) => {
   return c.json({ token, user: { id: user.id, email: user.email, role: user.role } })
 })
 
-auth.get('/me', jwt({ secret: c => c.env.JWT_SECRET }), async (c) => {
+auth.get('/me', jwt({ secret: c => c.env.JWT_SECRET, alg: 'HS256' }), async (c) => {
   const payload = c.get('jwtPayload')
   return c.json({ id: payload.sub, email: payload.email, role: payload.role })
 })

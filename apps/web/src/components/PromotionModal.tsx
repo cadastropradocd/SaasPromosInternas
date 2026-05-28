@@ -40,7 +40,7 @@ interface PromotionModalProps {
 }
 
 export function PromotionModal({ open, onClose, onSaved, editing }: PromotionModalProps) {
-  const { token, user } = useAuth()
+  const { token } = useAuth()
   const [stores, setStores] = useState<Store[]>([])
   const [selectedStores, setSelectedStores] = useState<number[]>([])
   const [storeSearch, setStoreSearch] = useState('')
@@ -50,7 +50,6 @@ export function PromotionModal({ open, onClose, onSaved, editing }: PromotionMod
     handleSubmit,
     reset,
     setValue,
-    watch,
     formState: { errors, isSubmitting },
   } = useForm<PromotionFormData>({
     resolver: zodResolver(promotionSchema),
