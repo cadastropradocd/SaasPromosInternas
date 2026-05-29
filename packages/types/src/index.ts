@@ -104,3 +104,53 @@ export interface PromotionHistory {
   payload?: string
   created_at: string
 }
+
+// Cloudflare Bindings Types
+export interface Env {
+  JWT_SECRET: string
+  DB: D1Database
+  BACKUP_BUCKET: R2Bucket
+}
+
+// These would normally come from @cloudflare/workers-types
+// but we're defining minimal versions for type checking
+interface D1Database {
+  prepare(query: string): D1Statement
+}
+
+interface D1Statement {
+  bind(...values: any[]): D1Statement
+  all(): Promise<D1QueryResult>
+  first(): Promise<D1Row | null>
+  run(): Promise<void>
+}
+
+interface D1QueryResult {
+  results: any[] | null
+}
+
+interface D1Row {
+  [key: string]: any
+}
+
+interface R2Bucket {
+  put(key: string, value: string | ArrayBufferLike, options?: { httpMetadata?: { contentType?: string } }): Promise<void>
+  list(): Promise<R2ListResult>
+  get(key: string): Promise<R2Object | null>
+  delete(key: string): Promise<void>
+}
+
+interface R2ListResult {
+  objects: R2ObjectInfo[]
+}
+
+interface R2ObjectInfo {
+  key: string
+  size: number
+  uploaded: string
+}
+
+interface R2Object {
+  body: ReadableStream<Uint8Array> | null
+  httpMetadata: { contentType?: string }
+}

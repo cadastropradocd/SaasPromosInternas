@@ -14,6 +14,15 @@ binding = "DB"
 database_name = "promos-db"
 database_id = "CHANGE_TO_YOUR_D1_ID"
 
+# R2 Bucket for backups
+[[r2_buckets]]
+binding = "BACKUP_BUCKET"
+bucket_name = "promos-backups"
+
 [vars]
 JWT_SECRET = "CHANGE_IN_PRODUCTION"
 API_URL = "https://api.yourdomain.workers.dev"
+
+# Scheduled trigger for daily backups at 2 AM UTC
+[triggers]
+crons = ["0 2 * * *"]

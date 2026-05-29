@@ -8,6 +8,7 @@ import { AtivasPage } from './pages/Ativas'
 import { HistoricoPage } from './pages/Historico'
 import { StoresPage } from './pages/Stores'
 import { PDFsPage } from './pages/PDFs'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -56,8 +57,10 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <ErrorBoundary>
+          <AppRoutes />
+        </ErrorBoundary>
       </AuthProvider>
     </BrowserRouter>
-  )
+  );
 }

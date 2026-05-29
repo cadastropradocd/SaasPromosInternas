@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { UserRole } from '@promos/types'
-import { ApiError } from '@/lib/api'
+import { ApiError, setOnUnauthenticated } from '@/lib/api'
 
 interface User {
   id: string
@@ -27,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const navigate = useNavigate()
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token')
@@ -37,7 +39,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(JSON.parse(storedUser))
     }
     setLoading(false)
-  }, [])
+    
+    // Set up unauthenticated handler
+    setOnUnauthenticated(() => {
+      logout()
+      navigate('/login', { replace: true })
+    })
+  }, [navigate])
 
   const refreshMe = async () => {
     const storedToken = localStorage.getItem('token')
