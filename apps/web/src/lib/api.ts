@@ -2,6 +2,7 @@ const API_BASE = '/api'
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined | null>
+  timeout?: number
 }
 
 export class ApiError extends Error {

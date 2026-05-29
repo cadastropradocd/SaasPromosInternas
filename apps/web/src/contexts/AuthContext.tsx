@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { UserRole } from '@promos/types'
 import { ApiError, setOnUnauthenticated } from '@/lib/api'
